@@ -19,6 +19,10 @@ and featuring a beautiful web-based UI.
 
 ## 🎥 Demo
 
+
+https://github.com/user-attachments/assets/879202ec-9982-4443-990d-1a998a3d0462
+
+
 ## 📦 Installation
 
 ```bash
