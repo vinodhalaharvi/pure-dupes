@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Pure Dupes - Find Duplicates</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --accent: #CD7F59;
+            --accent-light: #E0A388;
+            --accent-dark: #B06D4A;
+            --bg: #F5F3EF;
+            --text: #1A1A1A;
+            --gray: #6B6B6B;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            padding: 0;
+        }
+
+        .fab {
+            position: fixed;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: all 0.2s;
+            z-index: 1000;
+        }
+
+        .fab:hover {
+            background: var(--accent-dark);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+            transform: scale(1.05);
+        }
+
+        .fab:active {
+            transform: scale(0.95);
+        }
+
+        .fab-primary {
+            bottom: 24px;
+            right: 24px;
+        }
+
+        .fab-secondary {
+            bottom: 92px;
+            right: 24px;
+            width: 48px;
+            height: 48px;
+            font-size: 20px;
+            background: white;
+            color: var(--accent);
+            border: 2px solid var(--accent);
+        }
+
+        .fab-secondary:hover {
+            background: var(--bg);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .compact-input {
+            border: 1px solid #D9D9D9;
+            background: white;
+            border-radius: 8px;
+            transition: border 0.2s;
+        }
+
+        .compact-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .stat-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            background: white;
+            border: 1px solid #E5E5E5;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        .tree-node {
+            transition: background 0.1s;
+        }
+
+        .tree-node:hover {
+            background: #F9F9F9;
+        }
+
+        .kbd {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: monospace;
+            background: #F5F5F5;
+            border: 1px solid #D9D9D9;
+            border-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid;
+        }
+
+        .filter-chip:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        @keyframes slideInUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .slide-in {
+            animation: slideInUp 0.3s ease-out;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: #F5F5F5;
+            border-radius: 3px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: var(--accent);
+            border-radius: 3px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-dark);
+        }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+    const {useState, useEffect, useRef} = React;
+
+    function matchesDescendantWithFilters(node, query, filters) {
+        const matchesQuery = !query || (
+            query.startsWith('/')
+                ? (node.Path && node.Path.toLowerCase().includes(query.toLowerCase()))
+                : (node.Name && node.Name.toLowerCase().includes(query.toLowerCase()))
+        );
+
+        const hasAnyFilter = filters.fullDup || filters.partialDup || filters.unique;
+        let matchesFilter = true;
+
+        if (hasAnyFilter && !node.IsDir) {
+            const isFullDup = node.BestMatch >= 1.0;
+            const isPartialDup = node.BestMatch > 0 && node.BestMatch < 1.0;
+            const isUnique = node.BestMatch === 0;
+
+            matchesFilter = (filters.fullDup && isFullDup) ||
+                (filters.partialDup && isPartialDup) ||
+                (filters.unique && isUnique);
+        }
+
+        if (matchesQuery && matchesFilter) return true;
+
+        if (node.Children) {
+            return node.Children.some(child => matchesDescendantWithFilters(child, query, filters));
+        }
+
+        return false;
+    }
+
+    function countMatches(node, query) {
+        if (!query) return 0;
+        let count = 0;
+        const lowerQuery = query.toLowerCase();
+
+        if (query.startsWith('/')) {
+            if (node.Path && node.Path.toLowerCase().includes(lowerQuery)) count++;
+        } else {
+            if (node.Name && node.Name.toLowerCase().includes(lowerQuery)) count++;
+        }
+
+        if (node.Children) {
+            node.Children.forEach(child => {
+                count += countMatches(child, query);
+            });
+        }
+
+        return count;
+    }
+
+    function FileTreeNode({node, onFileClick, expanded, onToggle, searchQuery, filters}) {
+        const icon = node.IsDir ? '📁' : '📄';
+        let color = 'text-gray-600';
+
+        if (!node.IsDir) {
+            if (node.BestMatch >= 1.0) {
+                color = 'text-red-700 font-medium';
+            } else if (node.BestMatch > 0) {
+                color = 'text-[#CD7F59] font-medium';
+            }
+        }
+
+        const matchesSearch = (node, query) => {
+            if (!query) return true;
+            const lowerQuery = query.toLowerCase();
+            if (query.startsWith('/')) {
+                return node.Path && node.Path.toLowerCase().includes(lowerQuery);
+            }
+            return node.Name && node.Name.toLowerCase().includes(lowerQuery);
+        };
+
+        const matchesFilters = (node, filters) => {
+            if (!filters.fullDup && !filters.partialDup && !filters.unique) return true;
+            if (node.IsDir) return true;
+
+            const isFullDup = node.BestMatch >= 1.0;
+            const isPartialDup = node.BestMatch > 0 && node.BestMatch < 1.0;
+            const isUnique = node.BestMatch === 0;
+
+            return (filters.fullDup && isFullDup) || (filters.partialDup && isPartialDup) || (filters.unique && isUnique);
+        };
+
+        const isMatch = matchesSearch(node, searchQuery) && matchesFilters(node, filters);
+        const hasMatchingChild = node.Children && node.Children.some(child =>
+            matchesDescendantWithFilters(child, searchQuery, filters)
+        );
+
+        const hasActiveFilters = filters.fullDup || filters.partialDup || filters.unique;
+
+        if ((searchQuery || hasActiveFilters) && !isMatch && !hasMatchingChild) {
+            return null;
+        }
+
+        const highlightText = (text, query) => {
+            if (!query || !text) return text;
+            const lowerText = text.toLowerCase();
+            const lowerQuery = query.toLowerCase();
+            const index = lowerText.indexOf(lowerQuery);
+            if (index === -1) return text;
+
+            return (
+                <>
+                    {text.substring(0, index)}
+                    <span style={{backgroundColor: '#FFE082', fontWeight: 'bold'}}>
+                        {text.substring(index, index + query.length)}
+                    </span>
+                    {text.substring(index + query.length)}
+                </>
+            );
+        };
+
+        return (
+            <div className="ml-3">
+                <div
+                    className="flex items-center py-1 px-2 rounded tree-node cursor-pointer"
+                    onClick={() => {
+                        if (node.IsDir) {
+                            onToggle(node.Path);
+                        } else if (node.Matches && node.Matches.length > 0) {
+                            onFileClick(node);
+                        }
+                    }}
+                >
+                    <span className="mr-2 text-sm">{icon}</span>
+                    <span className={`text-sm ${color}`}>
+                        {searchQuery && !searchQuery.startsWith('/')
+                            ? highlightText(node.Name, searchQuery)
+                            : node.Name
+                        }
+                    </span>
+                    {!node.IsDir && node.BestMatch >= 1.0 && (
+                        <span className="ml-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">DUPE</span>
+                    )}
+                    {!node.IsDir && node.BestMatch > 0 && node.BestMatch < 1.0 && (
+                        <span className="ml-2 text-xs bg-orange-50 text-[#CD7F59] px-2 py-0.5 rounded">
+                            {(node.BestMatch * 100).toFixed(0)}%
+                        </span>
+                    )}
+                </div>
+                {node.IsDir && (expanded[node.Path] || ((searchQuery || hasActiveFilters) && hasMatchingChild)) && node.Children && (
+                    <div>
+                        {node.Children.map((child, i) => (
+                            <FileTreeNode
+                                key={i}
+                                node={child}
+                                onFileClick={onFileClick}
+                                expanded={expanded}
+                                onToggle={onToggle}
+                                searchQuery={searchQuery}
+                                filters={filters}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    function AnalysisModal({isOpen, onClose, analysis, loading, fileInfo}) {
+        if (!isOpen) return null;
+
+        return (
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-content slide-in" style={{maxWidth: '700px'}}
+                     onClick={(e) => e.stopPropagation()}>
+                    <div className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xl font-semibold" style={{color: 'var(--text)'}}>
+                                🤖 Analysis
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs" style={{color: 'var(--gray)'}}>
+                                    <span className="kbd">Esc</span> to close
+                                </span>
+                                <button
+                                    onClick={onClose}
+                                    className="text-gray-400 hover:text-gray-600 text-xl"
+                                    disabled={loading}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        {fileInfo && (
+                            <div className="mb-4 p-3 rounded" style={{backgroundColor: 'var(--bg)'}}>
+                                <div className="text-xs font-medium mb-1" style={{color: 'var(--gray)'}}>
+                                    Analyzing:
+                                </div>
+                                <div className="font-mono text-xs" style={{color: 'var(--text)'}}>
+                                    {fileInfo.name}
+                                </div>
+                                <div className="text-xs mt-1" style={{color: 'var(--gray)'}}>
+                                    {fileInfo.matchCount} duplicate{fileInfo.matchCount !== 1 ? 's' : ''} found
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-4">
+                            {loading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <div className="text-center">
+                                        <div className="animate-spin text-4xl mb-4">🤖</div>
+                                        <div className="text-sm" style={{color: 'var(--gray)'}}>
+                                            Analyzing your duplicates...
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : analysis ? (
+                                <div className="prose prose-sm max-w-none">
+                                    <div
+                                        className="text-sm leading-relaxed whitespace-pre-wrap"
+                                        style={{color: 'var(--text)'}}
+                                        dangerouslySetInnerHTML={{__html: analysis.replace(/\n/g, '<br/>')}}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="text-center py-8" style={{color: 'var(--gray)'}}>
+                                    <div className="text-4xl mb-2">🤖</div>
+                                    No analysis yet
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end pt-4 border-t">
+                            <button
+                                onClick={onClose}
+                                className="text-sm px-6 py-2 rounded"
+                                style={{background: 'var(--accent)', color: 'white'}}
+                                disabled={loading}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    function FilterModal({isOpen, onClose, filters, setFilters, searchQuery, setSearchQuery}) {
+        const inputRef = useRef(null);
+
+        useEffect(() => {
+            if (isOpen && inputRef.current) {
+                inputRef.current.focus();
+            }
+        }, [isOpen]);
+
+        if (!isOpen) return null;
+
+        return (
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-content slide-in" onClick={(e) => e.stopPropagation()}>
+                    <div className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xl font-semibold" style={{color: 'var(--text)'}}>
+                                🔍 Search & Filter
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs" style={{color: 'var(--gray)'}}>
+                                    <span className="kbd">Esc</span> to close
+                                </span>
+                                <button
+                                    onClick={onClose}
+                                    className="text-gray-400 hover:text-gray-600 text-xl"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                Search
+                            </label>
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder='Try "report" or "/home/user/docs"'
+                                className="w-full px-4 py-3 compact-input text-sm"
+                            />
+                            <div className="text-xs mt-2" style={{color: 'var(--gray)'}}>
+                                • Name search: <code className="kbd">report.pdf</code><br/>
+                                • Path search: <code className="kbd">/home/user</code>
+                            </div>
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium mb-3" style={{color: 'var(--text)'}}>
+                                Filter by type
+                            </label>
+                            <div className="space-y-2">
+                                <div
+                                    onClick={() => setFilters(prev => ({...prev, fullDup: !prev.fullDup}))}
+                                    className={`filter-chip ${
+                                        filters.fullDup
+                                            ? 'bg-red-100 text-red-700 border-red-300'
+                                            : 'bg-white text-gray-600 border-gray-300'
+                                    }`}
+                                >
+                                    <span className="mr-2">🔴</span>
+                                    Full Duplicates
+                                    {filters.fullDup && <span className="ml-2">✓</span>}
+                                </div>
+                                <div
+                                    onClick={() => setFilters(prev => ({...prev, partialDup: !prev.partialDup}))}
+                                    className={`filter-chip ${
+                                        filters.partialDup
+                                            ? 'bg-orange-100 border-orange-300'
+                                            : 'bg-white text-gray-600 border-gray-300'
+                                    }`}
+                                    style={filters.partialDup ? {color: 'var(--accent)'} : {}}
+                                >
+                                    <span className="mr-2">🟠</span>
+                                    Partial Matches
+                                    {filters.partialDup && <span className="ml-2">✓</span>}
+                                </div>
+                                <div
+                                    onClick={() => setFilters(prev => ({...prev, unique: !prev.unique}))}
+                                    className={`filter-chip ${
+                                        filters.unique
+                                            ? 'bg-gray-200 text-gray-700 border-gray-400'
+                                            : 'bg-white text-gray-600 border-gray-300'
+                                    }`}
+                                >
+                                    <span className="mr-2">⚫</span>
+                                    Unique Files
+                                    {filters.unique && <span className="ml-2">✓</span>}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-between items-center pt-4 border-t">
+                            <button
+                                onClick={() => {
+                                    setFilters({fullDup: false, partialDup: false, unique: false});
+                                    setSearchQuery('');
+                                }}
+                                className="text-sm px-4 py-2 rounded"
+                                style={{color: 'var(--gray)'}}
+                            >
+                                Clear All
+                            </button>
+                            <button
+                                onClick={onClose}
+                                className="text-sm px-6 py-2 rounded"
+                                style={{background: 'var(--accent)', color: 'white'}}
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    function SettingsModal({isOpen, onClose, settings, setSettings, onAnalyze}) {
+        if (!isOpen) return null;
+
+        return (
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-content slide-in" onClick={(e) => e.stopPropagation()}>
+                    <div className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xl font-semibold" style={{color: 'var(--text)'}}>
+                                ⚙️ Settings
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs" style={{color: 'var(--gray)'}}>
+                                    <span className="kbd">Esc</span> to close
+                                </span>
+                                <button
+                                    onClick={onClose}
+                                    className="text-gray-400 hover:text-gray-600 text-xl"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                    Directory Path
+                                </label>
+                                <input
+                                    type="text"
+                                    value={settings.dir}
+                                    onChange={(e) => setSettings(prev => ({...prev, dir: e.target.value}))}
+                                    placeholder="/path/to/directory"
+                                    className="w-full px-4 py-3 compact-input font-mono text-sm"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                    Similarity Threshold: {(settings.threshold * 100).toFixed(0)}%
+                                </label>
+                                <input
+                                    type="range"
+                                    min="0.5"
+                                    max="0.99"
+                                    step="0.01"
+                                    value={settings.threshold}
+                                    onChange={(e) => setSettings(prev => ({
+                                        ...prev,
+                                        threshold: parseFloat(e.target.value)
+                                    }))}
+                                    className="w-full"
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                    Tree Depth: {settings.maxDepth} level{settings.maxDepth > 1 ? 's' : ''}
+                                </label>
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="10"
+                                    step="1"
+                                    value={settings.maxDepth}
+                                    onChange={(e) => setSettings(prev => ({
+                                        ...prev,
+                                        maxDepth: parseInt(e.target.value)
+                                    }))}
+                                    className="w-full"
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                    Workers: {settings.numWorkers}
+                                </label>
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="16"
+                                    step="1"
+                                    value={settings.numWorkers}
+                                    onChange={(e) => setSettings(prev => ({
+                                        ...prev,
+                                        numWorkers: parseInt(e.target.value)
+                                    }))}
+                                    className="w-full"
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2" style={{color: 'var(--text)'}}>
+                                    Chunk Size: {settings.chunkSize} bytes
+                                </label>
+                                <input
+                                    type="range"
+                                    min="1024"
+                                    max="65536"
+                                    step="1024"
+                                    value={settings.chunkSize}
+                                    onChange={(e) => setSettings(prev => ({
+                                        ...prev,
+                                        chunkSize: parseInt(e.target.value)
+                                    }))}
+                                    className="w-full"
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                onAnalyze();
+                                onClose();
+                            }}
+                            disabled={!settings.dir}
+                            className="w-full mt-6 py-3 rounded-lg font-medium text-white disabled:bg-gray-300"
+                            style={{background: settings.dir ? 'var(--accent)' : undefined}}
+                        >
+                            Analyze Directory
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    function App() {
+        const [settings, setSettings] = useState({
+            dir: '',
+            threshold: 0.7,
+            maxDepth: 3,
+            numWorkers: 8,
+            chunkSize: 4096
+        });
+        const [result, setResult] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [selectedFile, setSelectedFile] = useState(null);
+        const [expanded, setExpanded] = useState({});
+        const [searchQuery, setSearchQuery] = useState('');
+        const [filters, setFilters] = useState({
+            fullDup: false,
+            partialDup: false,
+            unique: false
+        });
+        const [showFilterModal, setShowFilterModal] = useState(false);
+        const [showSettingsModal, setShowSettingsModal] = useState(false);
+        const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+        const [analysisResult, setAnalysisResult] = useState('');
+        const [analysisLoading, setAnalysisLoading] = useState(false);
+        const [selectedForAnalysis, setSelectedForAnalysis] = useState(null);
+
+        useEffect(() => {
+            const cores = navigator.hardwareConcurrency || 8;
+            setSettings(prev => ({...prev, numWorkers: cores}));
+        }, []);
+
+        useEffect(() => {
+            const handleKeyDown = (e) => {
+                // Cmd/Ctrl+K: Open appropriate modal
+                if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                    e.preventDefault();
+                    if (result) {
+                        setShowFilterModal(true);
+                    } else {
+                        setShowSettingsModal(true);
+                    }
+                }
+
+                // Esc: Close any open modal
+                if (e.key === 'Escape') {
+                    setShowFilterModal(false);
+                    setShowSettingsModal(false);
+                    if (!analysisLoading) {
+                        setShowAnalysisModal(false);
+                    }
+                }
+            };
+
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+        }, [result, analysisLoading]);
+
+        const analyze = async () => {
+            setLoading(true);
+            setSelectedFile(null);
+            setSearchQuery('');
+            try {
+                const res = await fetch('/api/dedup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+                const data = await res.json();
+                setResult(data);
+                setExpanded({[data.RootTree.Path]: true});
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        };
+
+        const toggleExpanded = (path) => {
+            setExpanded(prev => ({...prev, [path]: !prev[path]}));
+        };
+
+        const hasActiveFilters = filters.fullDup || filters.partialDup || filters.unique;
+
+        const getRecommendation = async (file) => {
+            setSelectedForAnalysis(file);
+            setShowAnalysisModal(true);
+            setAnalysisLoading(true);
+            setAnalysisResult('');
+
+            try {
+                // Prepare the context about the file and its duplicates
+                const duplicatesList = file.Matches.map((m, i) =>
+                    `${i + 1}. ${m.TargetPath} (${(m.Similarity * 100).toFixed(1)}% match, ${formatBytes(m.SharedSize)} shared)`
+                ).join('\n');
+
+                const prompt = `I'm analyzing duplicate files and need your help deciding which to keep.
+
+**Original File:**
+${file.Path}
+Size: ${formatBytes(file.Size)}
+
+**Duplicates Found:**
+${duplicatesList}
+
+**Please analyze:**
+1. Which file should I keep based on the file paths? Consider:
+   - Location logic (backup folders, temp folders, organized vs messy paths)
+   - File naming conventions
+   - Directory structure quality
+
+2. Are there any organizational insights about these file paths?
+
+3. What's your recommended cleanup strategy for these duplicates?
+
+Provide practical, actionable advice. Be concise but helpful.`;
+
+                const response = await fetch("https://api.anthropic.com/v1/messages", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        model: "sonnet-4-20250514",
+                        max_tokens: 1500,
+                        messages: [
+                            {role: "user", content: prompt}
+                        ]
+                    })
+                });
+
+                const data = await response.json();
+                const analysisResponse = data.content[0].text;
+
+                setAnalysisResult(analysisResponse);
+            } catch (err) {
+                setAnalysisResult(`Error getting analysis: ${err.message}\n\nPlease try again.`);
+            } finally {
+                setAnalysisLoading(false);
+            }
+        };
+
+        const getStrategyRecommendation = async () => {
+            if (!result) return;
+
+            setSelectedForAnalysis({
+                Name: 'All Duplicates',
+                Matches: [{length: result.FullDupCount + result.PartialDupCount}]
+            });
+            setShowAnalysisModal(true);
+            setAnalysisLoading(true);
+            setAnalysisResult('');
+
+            try {
+                // Get sample of duplicates for analysis
+                const allDuplicates = Object.entries(result.AllMatches).slice(0, 10).map(([path, matches]) => {
+                    const matchInfo = matches.map(m => `  → ${m.TargetPath} (${(m.Similarity * 100).toFixed(0)}%)`).join('\n');
+                    return `${path}\n${matchInfo}`;
+                }).join('\n\n');
+
+                const prompt = `I'm analyzing a directory with duplicate files and need an overall cleanup strategy.
+
+**Summary:**
+- Total files: ${result.TotalFiles}
+- Full duplicates: ${result.FullDupCount}
+- Partial matches: ${result.PartialDupCount}
+- Potential space savings: ${formatBytes(result.SpaceSaved)}
+
+**Sample duplicates (showing first 10):**
+${allDuplicates}
+
+**Please provide:**
+1. An overall assessment of the duplication patterns
+2. Common organizational issues you see in the file paths
+3. A prioritized cleanup strategy (what to tackle first)
+4. Best practices for preventing future duplicates in this directory
+
+Keep it practical and actionable. Focus on patterns, not individual files.`;
+
+                const response = await fetch("https://api.anthropic.com/v1/messages", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        model: "sonnet-4-20250514",
+                        max_tokens: 2000,
+                        messages: [
+                            {role: "user", content: prompt}
+                        ]
+                    })
+                });
+
+                const data = await response.json();
+                const analysisResponse = data.content[0].text;
+
+                setAnalysisResult(analysisResponse);
+            } catch (err) {
+                setAnalysisResult(`Error getting analysis: ${err.message}\n\nPlease try again.`);
+            } finally {
+                setAnalysisLoading(false);
+            }
+        };
+
+        return (
+            <div className="min-h-screen" style={{background: 'var(--bg)', paddingBottom: '100px'}}>
+                {/* Header */}
+                <div className="bg-white border-b" style={{borderColor: '#E5E5E5'}}>
+                    <div className="max-w-6xl mx-auto px-6 py-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div>
+                                    <h1 className="text-2xl font-semibold" style={{color: 'var(--text)'}}>
+                                        🔍 Pure Dupes
+                                    </h1>
+                                    <p className="text-xs mt-1" style={{color: 'var(--gray)'}}>
+                                        Find duplicate files with Merkle trees
+                                    </p>
+                                </div>
+                                {result && (
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                setResult(null);
+                                                setSelectedFile(null);
+                                                setSearchQuery('');
+                                                setFilters({fullDup: false, partialDup: false, unique: false});
+                                                setExpanded({});
+                                            }}
+                                            className="text-sm px-4 py-2 rounded-lg border hover:bg-gray-50 transition-colors"
+                                            style={{borderColor: '#D9D9D9', color: 'var(--gray)'}}
+                                            title="Start a new analysis"
+                                        >
+                                            ← New Analysis
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            {result && (
+                                <div className="flex flex-wrap gap-2">
+                                    <div className="stat-badge">
+                                        <span className="mr-1">📁</span>
+                                        {result.TotalFiles} files
+                                    </div>
+                                    <div className="stat-badge">
+                                        <span className="mr-1">🔴</span>
+                                        {result.FullDupCount} dupes
+                                    </div>
+                                    <div className="stat-badge">
+                                        <span className="mr-1">🟠</span>
+                                        {result.PartialDupCount} partial
+                                    </div>
+                                    <div className="stat-badge">
+                                        <span className="mr-1">💾</span>
+                                        {formatBytes(result.SpaceSaved)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Main Content */}
+                <div className="max-w-6xl mx-auto px-6 py-6">
+                    {!result ? (
+                        <div className="bg-white rounded-xl p-12 text-center">
+                            <div className="text-6xl mb-4">🔍</div>
+                            <h2 className="text-2xl font-semibold mb-2" style={{color: 'var(--text)'}}>
+                                Ready to find duplicates
+                            </h2>
+                            <p className="mb-6" style={{color: 'var(--gray)'}}>
+                                Click the button below or press <span className="kbd">⌘K</span> to choose a directory
+                            </p>
+                            <button
+                                onClick={() => setShowSettingsModal(true)}
+                                className="px-8 py-3 rounded-lg font-medium text-white"
+                                style={{background: 'var(--accent)'}}
+                            >
+                                Choose Directory
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-12 gap-6">
+                            {/* File Tree */}
+                            <div className="col-span-7 bg-white rounded-xl p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-semibold" style={{color: 'var(--text)'}}>
+                                        Directory Tree
+                                    </h2>
+                                    <div className="flex items-center gap-2">
+                                        {(searchQuery || hasActiveFilters) && (
+                                            <button
+                                                onClick={() => {
+                                                    setSearchQuery('');
+                                                    setFilters({fullDup: false, partialDup: false, unique: false});
+                                                }}
+                                                className="text-xs px-3 py-1 rounded"
+                                                style={{color: 'var(--gray)'}}
+                                            >
+                                                Clear filters ✕
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => setShowFilterModal(true)}
+                                            className="text-xs px-3 py-1 rounded border"
+                                            style={{borderColor: '#D9D9D9'}}
+                                        >
+                                            <span className="kbd mr-1">⌘K</span> Filter
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="max-h-[600px] overflow-y-auto scrollbar-thin font-mono text-sm">
+                                    <FileTreeNode
+                                        node={result.RootTree}
+                                        onFileClick={setSelectedFile}
+                                        expanded={expanded}
+                                        onToggle={toggleExpanded}
+                                        searchQuery={searchQuery}
+                                        filters={filters}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Match Details */}
+                            <div className="col-span-5 bg-white rounded-xl p-6">
+                                <h2 className="text-lg font-semibold mb-4" style={{color: 'var(--text)'}}>
+                                    Match Details
+                                </h2>
+                                {selectedFile ? (
+                                    <div>
+                                        <div className="mb-4 p-3 rounded" style={{background: 'var(--bg)'}}>
+                                            <div className="text-xs" style={{color: 'var(--gray)'}}>Selected:</div>
+                                            <div className="font-mono text-sm break-all mt-1"
+                                                 style={{color: 'var(--text)'}}>
+                                                {selectedFile.Name}
+                                            </div>
+                                            <div className="text-xs mt-1" style={{color: 'var(--gray)'}}>
+                                                {formatBytes(selectedFile.Size)}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3 max-h-[500px] overflow-y-auto scrollbar-thin">
+                                            {selectedFile.Matches.map((match, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className={`p-4 rounded-lg ${
+                                                        match.Similarity >= 1.0
+                                                            ? 'bg-red-50 border border-red-200'
+                                                            : 'bg-orange-50 border border-orange-200'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className={`text-xs font-medium px-2 py-1 rounded ${
+                                                            match.Similarity >= 1.0
+                                                                ? 'bg-red-100 text-red-700'
+                                                                : 'bg-orange-100'
+                                                        }`}
+                                                              style={match.Similarity >= 1.0 ? {} : {color: 'var(--accent)'}}>
+                                                            {match.Similarity >= 1.0 ? '🔴 DUPE' : `🟠 ${(match.Similarity * 100).toFixed(0)}%`}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="font-mono text-xs break-all p-2 rounded bg-white">
+                                                        📍 {match.TargetPath}
+                                                    </div>
+
+                                                    <div className="text-xs mt-2" style={{color: 'var(--gray)'}}>
+                                                        Shared: {formatBytes(match.SharedSize)}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-12" style={{color: 'var(--gray)'}}>
+                                        <div className="text-4xl mb-2">👆</div>
+                                        Click a file to see matches
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* FABs */}
+                {!loading && (
+                    <>
+                        <button
+                            onClick={() => result ? setShowFilterModal(true) : setShowSettingsModal(true)}
+                            className="fab fab-primary"
+                            title={result ? "Search & Filter (⌘K)" : "Choose Directory (⌘K)"}
+                        >
+                            {result ? '🔍' : '⚙️'}
+                        </button>
+                        {result && (
+                            <button
+                                onClick={() => setShowSettingsModal(true)}
+                                className="fab fab-secondary"
+                                title="Settings"
+                            >
+                                ⚙️
+                            </button>
+                        )}
+                    </>
+                )}
+
+                {loading && (
+                    <div className="fab fab-primary" style={{cursor: 'default'}}>
+                        <div className="animate-spin">⚙️</div>
+                    </div>
+                )}
+
+                {/* Modals */}
+                <FilterModal
+                    isOpen={showFilterModal}
+                    onClose={() => setShowFilterModal(false)}
+                    filters={filters}
+                    setFilters={setFilters}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                />
+
+                <SettingsModal
+                    isOpen={showSettingsModal}
+                    onClose={() => setShowSettingsModal(false)}
+                    settings={settings}
+                    setSettings={setSettings}
+                    onAnalyze={analyze}
+                />
+
+                <AnalysisModal
+                    isOpen={showAnalysisModal}
+                    onClose={() => setShowAnalysisModal(false)}
+                    analysis={analysisResult}
+                    loading={analysisLoading}
+                    fileInfo={selectedForAnalysis ? {
+                        name: selectedForAnalysis.Name,
+                        matchCount: selectedForAnalysis.Matches.length
+                    } : null}
+                />
+            </div>
+        );
+    }
+
+    ReactDOM.render(<App/>, document.getElementById('root'));
+</script>
+</body>
+</html>
